@@ -17,7 +17,7 @@ import { UUIDManager } from "./util";
 import { WyomingServer } from "./wyoming";
 import { ZeroconfManager } from "./zeroconf";
 import { Settings } from "./settings";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { SavedSettings } from "./proto/hassmic";
 
 // note - patched version from
@@ -49,6 +49,9 @@ export default function Index() {
     TaskState.UNKNOWN
   );
   const [uuid, setUUID] = useState("");
+
+  // Ref to track if initial setup effect has run
+  const initialSetupDone = useRef(false);
 
   // check audio permission silently
   const checkAudioPermission = async (): Promise<boolean> => {
@@ -99,59 +102,92 @@ export default function Index() {
     LiveAudioStream.stop();
   };
 
-  const bgSwitchChanged = async (newValue: boolean) => {
-    console.log(`Background switch changed: ${newValue}`);
-    BackgroundTaskManager.setEnabled(newValue);
-    if (newValue) {
-      await BackgroundTaskManager.run();
-    } else {
-      BackgroundTaskManager.stop();
-    }
-  };
-
   const settingsUpdated = async (newSettings: SavedSettings) => {
     setUUID(newSettings.hassmicUuid);
   };
 
-  // useEffect(..., []) means this code will be called once on component mount
-  // (or twice in dev mode, maybe?). Do the setup stuff here.
+  // useEffect(..., []) for initial setup on component mount
   useEffect(() => {
+    // Prevent running twice in StrictMode or due to remounts
+    if (initialSetupDone.current) {
+        return;
+    }
+    initialSetupDone.current = true;
+
+    console.log("[main.tsx] Running initial setup useEffect...");
+
+    // Setup callbacks
     CheyenneSocket.setConnectionStateCallback(setIsCheyenneConnected);
     WyomingServer.setConnectionStateCallback(setIsWyomingConnected);
     NetworkInfo.getIPV4Address().then(setLocalIP);
-    //UUIDManager.getUUID().then(setUUID);
     Settings.registerSettingsChangedCallback(settingsUpdated);
 
-    // kill any existing instance of the background task (ie, task running even
-    // though the app was killed)
+    // Kill any potentially orphaned background task on app startup
+    console.log("[main.tsx] Killing orphaned background task (if any)...");
     BackgroundTaskManager.kill();
 
+    // Register callbacks to get current state from the manager
     BackgroundTaskManager.setEnableStateCallback(setBackgroundTaskEnabled);
     BackgroundTaskManager.setTaskStateCallback(setBackgroundTaskState);
 
-    // checkAudioPermission and checkNotificationPermission should set their
-    // state state values, but in useEffect(..., []) that doesn't work. Using
-    // .then() solves that problem.
+    // Check permissions
     checkAudioPermission().then((ok) => {
       setHasAudioPermission(ok);
+      console.log(`[main.tsx] Initial Audio Permission: ${ok}`);
     });
     checkNotificationPermission().then((ok) => {
       setHasNotificationPermission(ok);
+      console.log(`[main.tsx] Initial Notification Permission: ${ok}`);
     });
+
+    // IMPORTANT: Empty dependency array ensures this runs only once on mount
   }, []);
 
-  // when background task is toggled on or off, start or stop it accordingly.
+  // useEffect to react to changes in the background task enabled state
   useEffect(() => {
+    // Don't run this effect until initial setup is complete
+    if (!initialSetupDone.current) {
+      return;
+    }
+
+    console.log(
+      `[main.tsx] useEffect [isBackgroundTaskEnabled] triggered. Enabled: ${isBackgroundTaskEnabled}, State: ${TaskState[backgroundTaskState]}`,
+    );
+
     if (isBackgroundTaskEnabled) {
-      if (backgroundTaskState != TaskState.RUNNING) {
+      // Only call run() if the task is definitively STOPPED or UNKNOWN.
+      // Let the BackgroundTaskManager itself handle the STARTING/RUNNING/FAILED checks internally.
+      if (
+        backgroundTaskState === TaskState.STOPPED ||
+        backgroundTaskState === TaskState.UNKNOWN
+      ) {
+        console.log(
+          `[main.tsx] Background task enabled and stopped/unknown. Calling BackgroundTaskManager.run()...`,
+        );
         BackgroundTaskManager.run();
+      } else {
+        console.log(
+          `[main.tsx] Background task enabled but state is ${TaskState[backgroundTaskState]}. No action needed from main.tsx.`,
+        );
       }
     } else {
-      if (backgroundTaskState == TaskState.RUNNING) {
-        BackgroundTaskManager.stop();
+      // Only kill if it's currently running or potentially starting
+      if (
+        backgroundTaskState === TaskState.RUNNING ||
+        backgroundTaskState === TaskState.STARTING
+      ) {
+        console.log(
+          `[main.tsx] Background task disabled and running/starting. Calling BackgroundTaskManager.kill()...`,
+        );
+        BackgroundTaskManager.kill();
+      } else {
+        console.log(
+          `[main.tsx] Background task disabled but state is ${TaskState[backgroundTaskState]}. No action needed from main.tsx.`,
+        );
       }
     }
-  }, [isBackgroundTaskEnabled]);
+    // Dependency array includes backgroundTaskState now to react to state changes if enabling fails
+  }, [isBackgroundTaskEnabled, backgroundTaskState]);
 
   return (
     <SafeAreaView style={{ flex: 1 }}>

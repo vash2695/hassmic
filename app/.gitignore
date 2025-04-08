@@ -1,4 +1,6 @@
 node_modules/
+OpenwakewordforAndroid-Reference-App/
+home-assistant-voice-pe-Reference-Device-Implementation/
 .expo/
 dist/
 npm-debug.*
