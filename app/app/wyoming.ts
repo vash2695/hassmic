@@ -10,7 +10,7 @@ import {
   ClientEvent,
   WyomingEvent,
 } from './proto/hassmic';
-import {CheyenneSocket} from './cheyenne';
+import {CheyenneClientSocket} from './cheyenne';
 
 const Logger = new HMLogger('wyoming.ts');
 type CallbackType<T> = ((s: T) => void) | null;
@@ -345,26 +345,53 @@ class WyomingServer_ {
       return;
     }
 
+    // First, convert the packet to a proto and send it to Cheyenne
+    // only if Cheyenne is connected.
+    if (CheyenneClientSocket.isConnected) {
+        try {
+          let ce = ClientEvent.create({
+            event: {
+              oneofKind: 'wyomingEvent',
+              wyomingEvent: p.toProto(),
+            },
+          });
+          CheyenneClientSocket.sendMessage(ClientMessage.create({msg: {oneofKind: 'clientEvent', clientEvent: ce}}));
+        } catch (e: any) {
+          Logger.error(
+            `Error forwarding wyoming event to hassmic integration: ${e.toString()}`,
+          );
+        }
+    } else {
+        // Log if not connected (optional, might be noisy)
+        Logger.warn(`Cheyenne not connected, not forwarding Wyoming event: ${p.getType()}`);
+    }
+
     let ptype = p.getType();
     if (['audio-chunk', 'ping', 'pong'].indexOf(ptype) == -1) {
-      try {
-        CheyenneSocket.sendMessage(
-          ClientMessage.create({
-            msg: {
-              oneofKind: 'clientEvent',
-              clientEvent: ClientEvent.create({
-                event: {
-                  oneofKind: 'wyomingEvent',
-                  wyomingEvent: p.toProto(),
+      // Forward important events to cheyenne too
+      // Add the isConnected check here as well
+      if (CheyenneClientSocket.isConnected) {
+          try {
+            CheyenneClientSocket.sendMessage(
+              ClientMessage.create({
+                msg: {
+                  oneofKind: 'clientEvent',
+                  clientEvent: ClientEvent.create({
+                    event: {
+                      oneofKind: 'wyomingEvent',
+                      wyomingEvent: p.toProto(),
+                    },
+                  }),
                 },
               }),
-            },
-          }),
-        );
-      } catch (e) {
-        Logger.error(
-          `Error forwarding wyoming event to hassmic integration: ${e}`,
-        );
+            );
+          } catch (e: any) {
+            Logger.error(
+              `Error forwarding wyoming event to hassmic integration (secondary): ${e.toString()}`,
+            );
+          }
+      } else {
+          Logger.warn(`Cheyenne not connected, not forwarding secondary Wyoming event: ${ptype}`);
       }
     }
     try {

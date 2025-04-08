@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {AppRegistry} from 'react-native';
 import {Buffer} from 'buffer';
-import {CheyenneSocket} from './cheyenne';
+import {CheyenneClientSocket} from './cheyenne';
 import {HMLogger} from './logger';
 import {NativeManager} from './nativemgr';
 import {PermissionsAndroid} from 'react-native';
@@ -141,14 +141,21 @@ class BackgroundTaskManager_ {
     const shouldStop = new Promise<void>(resolve => {
       this.stop_fn = resolve;
     });
-    // native event listeners
-    CheyenneSocket.startServer();
-    Logger.info('Started cheyenne server');
+
+    // Setup Cheyenne to connect when Zeroconf finds the service
+    // Assumes ZeroconfManager exposes a callback setter like this
+    // TODO: Verify/implement setHassMicFoundCallback in ZeroconfManager
+    ZeroconfManager.setHassMicFoundCallback((host: string, port: number) => {
+        Logger.info(`Zeroconf found HassMic service at ${host}:${port}, attempting connection.`);
+        CheyenneClientSocket.connect(host, port);
+    });
 
     WyomingServer.startServer();
     Logger.info('Started wyoming server');
 
+    // Start Zeroconf discovery AFTER setting the callback
     await ZeroconfManager.StartZeroconf();
+
     const ok = await PermissionsAndroid.check(
       PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
     );
@@ -184,9 +191,10 @@ class BackgroundTaskManager_ {
     Logger.info('Background task got stop signal, stopping');
     LiveAudioStream.stop();
     WyomingServer.stopServer();
-    CheyenneSocket.stopServer();
+    // Use the new disconnect method
+    CheyenneClientSocket.disconnect();
     NativeManager.killService();
-    ZeroconfManager.StopZeroconf();
+    ZeroconfManager.StopZeroconf(); // Ensure Zeroconf is stopped
     this.setState(TaskState.STOPPED);
   };
 

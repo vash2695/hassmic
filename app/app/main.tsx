@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { APP_VERSION } from "./constants";
 import { BackgroundTaskManager, TaskState } from "./backgroundtask";
-import { CheyenneSocket } from "./cheyenne";
+import { CheyenneClientSocket } from "./cheyenne";
 import { NetworkInfo } from "react-native-network-info";
 import { UUIDManager } from "./util";
 import { WyomingServer } from "./wyoming";
@@ -116,7 +116,7 @@ export default function Index() {
   // useEffect(..., []) means this code will be called once on component mount
   // (or twice in dev mode, maybe?). Do the setup stuff here.
   useEffect(() => {
-    CheyenneSocket.setConnectionStateCallback(setIsCheyenneConnected);
+    CheyenneClientSocket.setConnectionStateCallback(setIsCheyenneConnected);
     WyomingServer.setConnectionStateCallback(setIsWyomingConnected);
     NetworkInfo.getIPV4Address().then(setLocalIP);
     //UUIDManager.getUUID().then(setUUID);
