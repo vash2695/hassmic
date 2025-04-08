@@ -1,13 +1,12 @@
 // Handles and abstracts away interactions with native java code
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
-// Ensure BackgroundTaskModule is correctly referenced
-const BackgroundTaskModule = NativeModules.BackgroundTaskModule;
-import { Buffer } from 'buffer';
-import { CLIENT_EVENT_KEY, STORAGE_KEY_SAVED_SETTINGS_PROTO } from './constants';
-import { HMLogger } from './logger';
-import { Settings } from './settings';
+import {NativeModules, NativeEventEmitter} from 'react-native';
+const {BackgroundTaskModule} = NativeModules;
+import {Buffer} from 'buffer';
+import {CLIENT_EVENT_KEY, STORAGE_KEY_SAVED_SETTINGS_PROTO} from './constants';
+import {HMLogger} from './logger';
+import {Settings} from './settings';
 import {
   ClientEvent,
   ClientMessage,
@@ -18,52 +17,30 @@ import {
 
 const Logger = new HMLogger('nativemgr.ts');
 
-// Helper to get the module, handling potential null
-const getBackgroundTaskModule = () => {
-  if (!BackgroundTaskModule) {
-    Logger.error("NativeModules.BackgroundTask is null. Check native module registration and linking.");
-  }
-  return BackgroundTaskModule;
-}
-
 class NativeManager_ {
-  // Initialize emitter lazily after ensuring the module exists
-  private _emitter: NativeEventEmitter | null = null;
-  private get emitter(): NativeEventEmitter | null {
-      const module = getBackgroundTaskModule();
-      if (module && !this._emitter) {
-          this._emitter = new NativeEventEmitter(module);
-      }
-      return this._emitter;
-  }
+  emitter = new NativeEventEmitter(BackgroundTaskModule);
 
   // use a promise to be able to flag when everything is initialized.
   private setReady: () => void = () => {};
   private ready_: Promise<void> | null = null;
 
   constructor() {
-    this.ready_ = new Promise<void>((resolve) => {
+    this.ready_ = new Promise<void>(resolve => {
       this.setReady = resolve;
     });
     // run async init
     this.initialize_().then(
-      (ok) => Logger.debug('Init ok'),
-      (nok) => Logger.debug(`Init not ok: ${nok}`),
+      ok => Logger.debug('Init ok'),
+      nok => Logger.debug(`Init not ok: ${nok}`),
     );
   }
 
   // perform async initializiations
   private initialize_ = async () => {
-    // Ensure module is available before adding listener
-    if (this.emitter) {
-        this.addClientEventListener(this.onClientEvent);
-        Logger.debug('Native manager is ready.');
-        this.setReady();
-    } else {
-        // Retry or handle error if module is persistently null
-        Logger.error("Failed to initialize NativeEventEmitter: BackgroundTaskModule is null.");
-        // Consider adding a retry mechanism or reporting a fatal error
-    }
+    this.addClientEventListener(this.onClientEvent);
+
+    Logger.debug('Native manager is ready.');
+    this.setReady();
   };
 
   waitForReady = async () => {
@@ -72,12 +49,7 @@ class NativeManager_ {
 
   // Add a listener for ClientEvents sent by native code.
   addClientEventListener = (f: (ev: ClientEvent) => Promise<void>) => {
-    const currentEmitter = this.emitter;
-    if (!currentEmitter) {
-        Logger.error("Cannot add listener: NativeEventEmitter is not initialized.");
-        return;
-    }
-    currentEmitter.addListener(CLIENT_EVENT_KEY, async (ev) => {
+    this.emitter.addListener(CLIENT_EVENT_KEY, async ev => {
       Logger.debug(`Proto-valued event: "${ev}"`);
       try {
         let ce = ClientEvent.fromBinary(
@@ -93,42 +65,22 @@ class NativeManager_ {
 
   // Process a message that needs to be handled by native code
   handleHassmicCommand(hm: HassmicCommand) {
-    const module = getBackgroundTaskModule();
-    if (!module) return;
-
     let hmb64: string = Buffer.from(HassmicCommand.toBinary(hm)).toString(
       'base64',
     );
-    module.handleHassmicCommand(hmb64);
+    BackgroundTaskModule.handleHassmicCommand(hmb64);
   }
 
   // kill any existing instance of the task
   killService = () => {
-    const module = getBackgroundTaskModule();
-    if (!module) return;
     try {
-      // Check if stopService exists before calling
-      if (module.stopService) {
-          module.stopService();
-      } else {
-          Logger.warn("Native BackgroundTaskModule does not have stopService method.");
-      }
-    } catch (e) {
-        Logger.error(`Error calling stopService: ${e}`);
-    }
+      BackgroundTaskModule.stopService();
+    } catch (e) {}
   };
 
   // start the task
   runService = () => {
-    const module = getBackgroundTaskModule();
-    if (!module) return;
-
-    // Check if startService exists before calling
-    if (module.startService) {
-        module.startService();
-    } else {
-        Logger.error("Native BackgroundTaskModule does not have startService method.");
-    }
+    BackgroundTaskModule.startService();
   };
 
   // What to do on ClientEvent receipt from native code

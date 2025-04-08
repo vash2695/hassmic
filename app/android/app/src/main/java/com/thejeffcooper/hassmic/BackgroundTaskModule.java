@@ -12,6 +12,7 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
+import com.google.protobuf.GeneratedMessageLite;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.thejeffcooper.hassmic.proto.*;
 import com.thejeffcooper.hassmic.proto.Log.Severity;
@@ -30,35 +31,35 @@ public class BackgroundTaskModule extends ReactContextBaseJavaModule {
     reactContext = context;
 
     BroadcastReceiver jsEventRec =
-        new BroadcastReceiver() {
-          @Override
-          public void onReceive(Context context, Intent intent) {
-            byte[] protodata = intent.getByteArrayExtra(KEY_JS_EVENT_PROTO);
-            if (protodata == null || protodata.length == 0) {
-              Log.e(
-                  "HassmicBackgroundTaskModule",
-                  "Was asked to send a JS event, but didn't get proto data");
-              return;
-            }
-            try {
-              Log.d(
-                  "HassmicBackgroundTaskModule",
-                  "Sending event JS event " + ClientEvent.parseFrom(protodata).getEventCase());
-              reactContext
-                  .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
-                  .emit(
-                      KEY_JS_PROTO_VALUED_EVENT, Base64.encodeToString(protodata, Base64.NO_WRAP));
-            } catch (InvalidProtocolBufferException e) {
-              Log.e("HassmicBackgroundTaskModule", "Failed to send JS event: bad proto");
-            }
-          }
-        };
+            new BroadcastReceiver() {
+              @Override
+              public void onReceive(Context context, Intent intent) {
+                byte[] protodata = intent.getByteArrayExtra(KEY_JS_EVENT_PROTO);
+                if (protodata == null || protodata.length == 0) {
+                  Log.e(
+                          "HassmicBackgroundTaskModule",
+                          "Was asked to send a JS event, but didn't get proto data");
+                  return;
+                }
+                try {
+                  Log.d(
+                          "HassmicBackgroundTaskModule",
+                          "Sending event JS event " + ClientEvent.parseFrom(protodata).getEventCase());
+                  reactContext
+                          .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                          .emit(
+                                  KEY_JS_PROTO_VALUED_EVENT, Base64.encodeToString(protodata, Base64.NO_WRAP));
+                } catch (InvalidProtocolBufferException e) {
+                  Log.e("HassmicBackgroundTaskModule", "Failed to send JS event: bad proto");
+                }
+              }
+            };
 
     ContextCompat.registerReceiver(
-        reactContext,
-        jsEventRec,
-        new IntentFilter(KEY_FIRE_JS_EVENT),
-        ContextCompat.RECEIVER_NOT_EXPORTED);
+            reactContext,
+            jsEventRec,
+            new IntentFilter(KEY_FIRE_JS_EVENT),
+            ContextCompat.RECEIVER_NOT_EXPORTED);
   }
 
   @Override
@@ -89,33 +90,45 @@ public class BackgroundTaskModule extends ReactContextBaseJavaModule {
     byte[] hmbytes = Base64.decode(hassmicCommandBase64, Base64.DEFAULT);
     Log.d("HassmicBackgroundTaskModule", "Handling hassmic command");
     Intent protoIntent =
-        new Intent(BackgroundTaskService.PROTO_HASSMICCOMMAND_ACTION)
-            .putExtra(BackgroundTaskService.KEY_PROTO_DATA, hmbytes);
+            new Intent(BackgroundTaskService.PROTO_HASSMICCOMMAND_ACTION)
+                    .putExtra(BackgroundTaskService.KEY_PROTO_DATA, hmbytes);
     this.reactContext.sendBroadcast(protoIntent);
     this.logToServer(
-        this.reactContext, Severity.SEVERITY_DEBUG, "Successfully handled hassmic command");
+            this.reactContext, Severity.SEVERITY_DEBUG, "Successfully handled hassmic command");
   }
 
+  // Static method to allow Service to log back via JS events
   public static void logToServer(
-      Context ctx, com.thejeffcooper.hassmic.proto.Log.Severity severity, String msg) {
-    Log.d("HassmicBackgroundTaskModule", "Sending log to server: '" + msg + "'");
+          Context ctx, com.thejeffcooper.hassmic.proto.Log.Severity severity, String msg) {
+    Log.d("BackgroundTaskModule", "Sending log to server: '" + msg + "'");
     ClientEvent ev =
-        ClientEvent.newBuilder()
-            .setLog(
-                com.thejeffcooper.hassmic.proto.Log.newBuilder()
-                    .setSeverity(severity)
-                    .setLogText(msg)
-                    .build())
-            .build();
-    Intent fireJSEvent = new Intent(KEY_FIRE_JS_EVENT);
-    fireJSEvent.putExtra(KEY_JS_EVENT_PROTO, ev.toByteArray());
-    ctx.sendBroadcast(fireJSEvent);
+            ClientEvent.newBuilder()
+                    .setLog(
+                            com.thejeffcooper.hassmic.proto.Log.newBuilder()
+                                    .setSeverity(severity)
+                                    .setLogText(msg)
+                                    .build())
+                    .build();
+    // Use the same broadcast mechanism as FireJSEvent
+    FireJSEvent(ctx, ev);
   }
 
-  public static void FireJSEvent(Context ctx, ClientEvent ev) {
-    Log.d("HassmicBackgroundTaskModule", "Firing JS Event");
-    Intent fireJSEvent = new Intent(KEY_FIRE_JS_EVENT);
-    fireJSEvent.putExtra(KEY_JS_EVENT_PROTO, ev.toByteArray());
-    ctx.sendBroadcast(fireJSEvent);
+  // Static method potentially needed by BackgroundTaskService (or others) to fire events via JS
+  // Uses the BroadcastReceiver mechanism for consistency
+  public static void FireJSEvent(Context applicationContext, GeneratedMessageLite<?, ?> proto) {
+    Log.d("HassMicBackgroundTaskModule", "Firing event via broadcast");
+    if (!(proto instanceof ClientEvent)) {
+      Log.e("HassMicBackgroundTaskModule", "FireJSEvent currently only supports ClientEvent protos. Got: " + proto.getClass().getName());
+      return;
+    }
+    ClientEvent ce = (ClientEvent) proto;
+    Log.d("HassMicBackgroundTaskModule", "Event Type=" + ce.getEventCase().toString());
+
+    Intent fireJSEventIntent = new Intent(KEY_FIRE_JS_EVENT);
+    // Make intent explicit by setting package
+    fireJSEventIntent.setPackage(applicationContext.getPackageName());
+    fireJSEventIntent.putExtra(KEY_JS_EVENT_PROTO, ce.toByteArray());
+    applicationContext.sendBroadcast(fireJSEventIntent);
+    Log.d("HassMicBackgroundTaskModule", "Broadcast sent for event: " + ce.getEventCase().toString());
   }
 }

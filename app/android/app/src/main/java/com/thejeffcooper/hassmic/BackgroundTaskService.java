@@ -144,7 +144,7 @@ public class BackgroundTaskService extends Service {
                     ClientEvent.Builder protob = ClientEvent.newBuilder();
 
                     // some common info
-                    @Player.Event int playbackState = p.getPlaybackState();
+                    @Player.State int playbackState = p.getPlaybackState();
                     boolean isPlaying = p.isPlaying();
 
                     // Don't send duplicate messages:
