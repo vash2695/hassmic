@@ -51,6 +51,8 @@ class ZeroconfManager_ {
     // Remove existing listeners before adding new ones
     this.zeroconf.removeDeviceListeners();
 
+    Logger.info('Adding Zeroconf listeners...');
+
     this.zeroconf.on('error', (err: any) => {
         Logger.error(`Zeroconf Error: ${err}`);
         // Consider adding more robust error handling/retry logic
@@ -113,8 +115,25 @@ class ZeroconfManager_ {
         // if (serviceName corresponds to this._discoveredServiceKey) { ... }
     });
 
+    // ---- Listener for HTTP debugging ----
+    this.zeroconf.on('found', service => {
+      if (service.type === 'http' || (service.name && service.name.toLowerCase().includes('http'))) {
+        Logger.warn(`[DEBUG] Found HTTP Service: ${JSON.stringify(service)}`);
+      }
+    });
+    this.zeroconf.on('resolved', service => {
+       if (service.type === 'http' || (service.name && service.name.toLowerCase().includes('http'))) {
+          Logger.warn(`[DEBUG] Resolved HTTP Service: ${JSON.stringify(service)}`);
+       }
+    });
+    // ---- End Listener for HTTP debugging ----
+
+    Logger.info('Zeroconf listeners added.');
+
     // Start scanning for the specific service type
     this.zeroconf.scan('hassmic', 'tcp', 'local.');
+    Logger.info('Starting DEBUG scan for _http._tcp.local.');
+    this.zeroconf.scan('http', 'tcp', 'local.');
   };
 
   StopZeroconf = async () => {
